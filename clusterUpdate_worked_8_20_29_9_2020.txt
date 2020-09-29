@@ -21,7 +21,14 @@ str_gr3<-str_gr2 %>% select(clu00,s04,s05,s06)
 g1<-str_gr3 %>% rename(gps_clus__Latitude=s04,gps_clus__Longitude=s05,gps_clus__Altitude=s06)
 cluster1<-cluster %>% select(-clu09)
 clu<-cluster1 %>% left_join(g1, by="clu00")
-write.table(clu, file="C:/Users/user/Desktop/worked/Rcode/dat/nassepvUpdate.tab", na = "",
+######
+###---------------------------------------------------------------input the cluster numbers here
+cluster_Numbers<-c(2139)
+clu2<-clu %>% filter(clu00 %in% cluster_Numbers)
+
+###--------------------------------------------------------------------clusters end here
+
+write.table(clu2, file="C:/Users/user/Desktop/worked/Rcode/dat/nassepvUpdate.tab", na = "",
             row.names = F, col.names = T,   quote = F,   sep = '\t')
 ########################################--------------end of nassep part
 head(str)
