@@ -1,0 +1,203 @@
+#creating upload files for the clusters in R
+#reading data from excel
+rm(list = ls())
+#library(readxl)
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+###-----------------------------------------------starts here
+##check how clean the datasets are before creating preloads
+#save files as .TAB to save on memory
+#########################################
+clu_main<-read.delim("C:/Users/user/Desktop/worked/Rcode/dat/RawData/CLUST.tab")
+#################------------------------------------------------                end of clu main
+#get total number ofhouseholds in a cluster
+hh_main <- read.delim("C:/Users/user/Desktop/worked/Rcode/dat/RawData/HH.tab")
+hh_main2<-hh_main %>% filter(!is.na(h07)) #filter any missing household number
+hh_tot<-hh_main2 %>% group_by(clu00) %>% summarise(totHh=n()) %>% arrange(totHh)
+#check if there are repeated serialization withing households in the structure
+hh_uniq<-hh_main2 %>% group_by(clu00,s02,h06b)%>% filter(n()>1)##find any duplicates in the dataset after remove h07
+hh_uniq #duplicated households
+
+###----------------------------------------------------Ensure no file has duplicated household number
+#Get total sum of structutes in a given cluster
+str_main<-read.delim("C:/Users/user/Desktop/worked/Rcode/dat/RawData/STRUCT.tab")
+str_tot<-str_main %>% group_by(clu00)%>% summarise(totStr=n()) %>% arrange(totStr)
+str_uniq<-str_main %>% group_by(clu00,s02)%>% filter(n()>1)##find any duplicates in the structure
+str_uniq##filter any duplicates structues 
+
+###############-----------------------------------------------------------------crucial
+################
+################\
+############
+#joing the structures and the households fo coding
+hh_str_TT<-str_tot %>% left_join(hh_tot, by="clu00") 
+#head(hh_str_TT)
+##select the cluster number for the selected structures
+##create a new str filtered depending on number of MAIN str in a cluster will be used for analysis
+str_sub<-str_tot #%>% filter(totStr>50) #greater than 50 structures in the cluster
+head(str_sub)
+
+#######--------------------------------clusters number selected for use
+cluster_Numbers<-str_sub$clu00
+###--------------------------------------------------------END CLUSTER NUMBERS
+
+#--------------------------------------------------------start creating clusters
+##
+cluster<-clu_main %>% filter(clu00 %in% cluster_Numbers)
+cluster$interview__id=cluster$clu00
+str<-str_main %>% filter(clu00 %in% cluster_Numbers)
+str$interview__id=str$clu00
+hh<-hh_main2 %>% filter(clu00 %in% cluster_Numbers)
+hh$interview__id=hh$clu00
+
+##create the nassepv tab
+#create the interview__id
+###write the first nassep VI tab 
+str_gr<-str %>% select(clu00,s04,s05,s06)
+str_gr2<-aggregate(str_gr, list(str_gr$clu00), FUN=head, 1)
+str_gr3<-str_gr2 %>% select(clu00,s04,s05,s06)
+g1<-str_gr3 %>% rename(gps_clus__Latitude=s04,gps_clus__Longitude=s05,gps_clus__Altitude=s06)%>%as.data.frame()
+#g1
+#head(g1)
+cluster1<-cluster %>% select(-clu09)%>%as.data.frame()
+cluster1$clu00<-as.integer(cluster1$clu00)
+clu<-cluster1 %>% left_join(g1, by="clu00")
+#head(clu)
+######
+###---------------------------------------------------------------input the cluster numbers here
+###--------------------------------------------------------------------clusters end here
+
+write.table(clu, file="C:/Users/user/Desktop/worked/Rcode/dat/finalData/nassepvUpdate.tab", na = "",
+            row.names = F, col.names = T,   quote = F,   sep = '\t')
+########################################--------------end of nassep part
+#head(str)
+attach(str)
+str2<-str %>% select(interview__id,s02)
+data_nas<-str2 %>% group_by(interview__id) %>% 
+  mutate(clusterpart__id = ifelse(s02 %in% 1:40,1,
+                                  ifelse(s02%in% 41:80,2,
+                                         ifelse(s02%in% 81:120,3,
+                                                ifelse(s02%in% 121:160,4,
+                                                       ifelse(s02%in% 161:200,5,6)))))) %>%
+  ungroup() %>%
+  group_by(interview__id,clusterpart__id) %>% mutate(val=1:n()-1,nid = cur_group_id()) %>% ungroup() %>%
+  select(-clusterpart__id) %>% mutate(interview__id=paste0(interview__id,'.',nid),val=paste0('s02','__',val)) %>% select(-nid) %>%
+  pivot_wider(names_from = c(val),values_from = s02) %>%
+  mutate(interview__id=gsub("\\..*","", interview__id)) %>% group_by(interview__id) %>%
+  mutate(clusterpart__id=1:n()) #%>% select(order(colnames(.)))
+#View(data_nas)
+###write the cluster tab 
+write.table(data_nas, file="C:/Users/user/Desktop/worked/Rcode/dat/finalData/clusterpart.tab", na = "##NA##",
+            row.names = F, col.names = T,   quote = F,   sep = '\t')
+
+############################### Creating the structure id based on cluster__id and interview__id from cluster tab 
+d3<-data_nas %>% 
+  pivot_longer(cols = starts_with('s02'), values_to = 's02') %>%    
+  group_by(interview__id, clusterpart__id) %>% 
+  mutate(structure__id = row_number())
+d4<-d3 %>% filter(!is.na(s02)) %>% select(-name)
+##manipulate to create the household tab
+#check if there is any missing h07 household number and drop it
+hh1<-hh %>% drop_na(h07)  #drop missing household numbers
+hh2<-hh1 %>% group_by(clu00,h07) %>%filter(n() > 1)#no duplicated households in a cluster
+hh3<-hh2 %>% group_by(clu00,s02, h06b) %>%filter(n() > 1)#no duplicated households in a structure
+hh4<-subset(hh3, h13+h14+h15+h16+h17+h18 != h12) ##sum of members in different households age category sum to the total in the household
+#Exctract the interview id and cluster part id from the created cluster data frame
+d4$interview__id<-as.integer(d4$interview__id)
+hh5<-hh1 %>% left_join(d4, by=c("interview__id","s02")) #%>% arrange(interview__id, clusterpart__id,s02)
+hh6<-hh5 %>% group_by(interview__id,structure__id) %>% mutate(household__id= row_number(structure__id))
+hhf<-hh6 %>% select(interview__id,	clusterpart__id,	structure__id,	household__id,s02,	h06b,	h07,	h08,	h09,	h10,	h20)
+hhff<-hhf %>% select(-s02)
+##############-----------------------------final household tab
+write.table(hhff, file="C:/Users/user/Desktop/worked/Rcode/dat/finalData/household.tab", na = "",
+            row.names = F, col.names = T,   quote = F,   sep = '\t')
+##############-----------------------------final household tab
+###########################------------------------------------creating structure sheet
+############-------------------------------------------------------------------------------------------------str
+hh55<-hh5 %>% select(interview__id, s02) %>%group_by(interview__id,s02)%>% summarise() %>%as.data.frame()
+d44<-d4 %>% as.data.frame() %>% select(interview__id, s02) 
+dz1<-d44 %>% anti_join(hh55, by=c("interview__id", "s02"))
+dz2<-dz1 %>%left_join(d4, by=c("interview__id","s02"))
+dz3<- merge(hh5,dz2,by=c("interview__id","clusterpart__id","structure__id","s02")) 
+dz4<-dplyr::bind_rows(dz2, hh5)
+################--------------------------------------------------------------------------------------------str
+hhg<-dz4 %>% select(interview__id ,clusterpart__id,structure__id,s02, h06b,h07) 
+str2<-hhg %>%
+  mutate(h06b = h06b - 1) %>% 
+  pivot_wider(names_from = h06b,values_from = h07,names_prefix = "h06b__")
+##merge with some selected variables from str
+str3<-str %>% select(interview__id,s02,s03,s04,s05,s06a,s06,s06b,s06c)
+final.str<-str2 %>% left_join(str3, by=c("interview__id","s02"))
+str22<-final.str %>% select(-h06b__NA)
+str23<-str22 %>% rename(gps__Latitude=s04,gps__Longitude=s05,gps__Altitude=s06)%>%as.data.frame()
+str24<- str23[order(str23$interview__id,str23$clusterpart__id,str23$structure__id,str23$s02),]#,clusterpart__id,structure__id,s02
+write.table(str24, file="C:/Users/user/Desktop/worked/Rcode/dat/finalData/structure.tab", na = "",
+            row.names = F, col.names = T,   quote = F,   sep = '\t')
+########################-------------------------------------final structure tab
+
+
+
+
+
+
+#################################code for cleaning the data from survey solutions
+
+#R codes for cluster update data cleaning 2020
+
+##Ngugi Mwenda, standards and methods
+
+##loading the packages
+library(readstata13)  #for reading the stata files
+library(dplyr)  #data manipulation
+library(haven)##foreign
+library(htmlTable)##html tables
+library(magrittr)  #manipulate
+library(loose.rock)  #for proper changing of the string cases
+
+nassepvUpdate<-read.dta13("C:/Users/user/Desktop/kcshp Cluster update/dataStata/NassepVupdate.dta")
+head(nassepvUpdate)
+
+
+
+cleanCluster<-subset(nassepvUpdate, select = c(clu00,clu01, clu02 ,clu03, clu04, clu05,clu06 , clu07 , clu08,                
+                                               clu09,clu10, clu11 ,clu12 ,clu13,date_int,approxdistance,travelhrsmins,
+                                               townsleep,distfromclust,security,causeofinsecurity__1,causeofinsecurity__2,
+                                               causeofinsecurity__3,causeofinsecurity__4,modetransport,terrain,terrainother,
+                                               clustersize,clustsize,clustsizeother,settlementpattern,tribesincluster1,per1,
+                                               tribesincluster2,per2,tribesincluster3,per3,othercomments,chief,chieftelphone,
+                                               asschief,asschieftelphone,villageelder,villageeldertelephone))
+head(cleanCluster)  #clean cluster part
+cleanCluster %>% htmlTable()
+
+
+##structure tab
+
+structure<- read.dta13("C:/Users/user/Desktop/kcshp Cluster update/dataStata/structure.dta")
+nassepStructure<-merge(nassepvUpdate,structure, by="interview__id")
+clust2<-nassepStructure %>% select(clu00,structure__id,s02,s03,gps_new__Latitude, gps_new__Longitude ,s06a,s06b,s06c, s06d_1,s06d)
+head(clust2)  ##clean structure
+View(clust2)
+
+##household tab
+
+household<- read.dta13("C:/Users/user/Desktop/kcshp Cluster update/dataStata/household.dta")
+nassepHouseHold<-merge(nassepvUpdate,household, by="interview__id")
+cleanHouseUnsort<-subset(nassepHouseHold, select = c( clu00,clusterpart__id,structure__id, household__id,
+                                                      h06b, h06e , h06f ,h07, h08 , h09 ,h10 , h12 , h13 ,
+                                                      h14 , h15, h16 , h17 ,h18 , h19 ,h20 , h20b ))
+
+house2<-cleanHouseUnsort %>%
+  mutate(str_add=case_when(
+    clusterpart__id==1 ~0,
+    clusterpart__id==2 ~40,
+    clusterpart__id==3 ~80,
+    clusterpart__id==4 ~120,
+    clusterpart__id==5 ~160,
+    clusterpart__id==6 ~200
+  )) %>%
+  group_by(clu00) %>%
+  mutate(s02=structure__id+str_add)
+
+housfin<-subset(house2, select = c( clu00,s02,  h06b,h07, h08 , h09 ,h10 , h12 , h13 ,h14 , h15, h16 , h17 ,h18 , h19 ,h20 , h20b ))
+View(housfin)  ##clean household
